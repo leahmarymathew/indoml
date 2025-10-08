@@ -79,12 +79,11 @@ class CustomTrainer(Trainer):
         super().__init__(*args, **kwargs)
         self.class_weights = class_weights
 
-    def compute_loss(self, model, inputs, return_outputs=False):
+    def compute_loss(self, model, inputs, return_outputs=False, **kwargs):  # <-- added **kwargs
         labels = inputs.pop("labels")
         outputs = model(**inputs)
         logits = outputs.logits
 
-        # Focal Loss
         ce_loss = torch.nn.CrossEntropyLoss(weight=self.class_weights.to(logits.device), reduction='none')
         ce = ce_loss(logits, labels)
         pt = torch.exp(-ce)
