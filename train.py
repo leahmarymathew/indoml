@@ -74,19 +74,22 @@ class DatathonDataset(Dataset):
         return item
 
 # -------------------- FOCAL LOSS --------------------
+
 class CustomTrainer(Trainer):
     def __init__(self, class_weights=None, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.class_weights = class_weights
 
-    def compute_loss(self, model, inputs, return_outputs=False, **kwargs):  # <-- added **kwargs
+    def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
         labels = inputs.pop("labels")
         outputs = model(**inputs)
         logits = outputs.logits
 
         ce_loss = torch.nn.CrossEntropyLoss(weight=self.class_weights.to(logits.device), reduction='none')
         ce = ce_loss(logits, labels)
-        pt = torch.exp(-ce)
+
+        # Detach to avoid second backward through same graph
+        pt = torch.exp(-ce.detach())
         loss = ((1 - pt) ** 2 * ce).mean()
 
         return (loss, outputs) if return_outputs else loss
