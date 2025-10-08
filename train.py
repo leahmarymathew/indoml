@@ -28,7 +28,7 @@ USE_LARGE = os.environ.get("USE_LARGE", "0") == "1"
 USE_8BIT = os.environ.get("USE_8BIT", "0") == "1"
 MODEL_CHECKPOINT = "microsoft/deberta-v3-large" if USE_LARGE else "microsoft/deberta-v3-base"
 TRAIN_FILE_PATH = "./trainset.json"
-DEV_TEST_FILE_PATH = "./dev-testset.json"
+DEV_TEST_FILE_PATH = "./dev_testset.json"
 MAX_LENGTH = 512
 NUM_FOLDS = 5
 RANDOM_STATE = 42
