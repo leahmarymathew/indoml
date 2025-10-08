@@ -79,18 +79,18 @@ class CustomTrainer(Trainer):
         super().__init__(*args, **kwargs)
         self.class_weights = class_weights
 
-    def compute_loss(self, model, inputs, return_outputs=False):
+    def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
         labels = inputs.pop("labels")
         outputs = model(**inputs)
         logits = outputs.logits
 
-        # Move class weights to same device
+        # Move weights to same device as logits
         loss_fct = torch.nn.CrossEntropyLoss(weight=self.class_weights.to(logits.device))
         loss = loss_fct(logits.view(-1, self.model.config.num_labels), labels.view(-1))
 
-        # detach everything cleanly — no graph reuse
         loss = loss.mean()
         return (loss, outputs) if return_outputs else loss
+
 
 # -------------------- MAIN --------------------
 if __name__ == "__main__":
