@@ -18,7 +18,7 @@ from transformers import (
 # -------------------- CONFIG --------------------
 MODEL_CHECKPOINT = "microsoft/deberta-v3-large"
 TRAIN_FILE_PATH = "./trainset.json"
-DEV_TEST_FILE_PATH = "./dev-testset.json"
+DEV_TEST_FILE_PATH = "./dev_testset.json"
 MAX_LENGTH = 512
 NUM_FOLDS = 5
 RANDOM_STATE = 42
@@ -166,7 +166,7 @@ if __name__ == "__main__":
             gradient_accumulation_steps=8,
             weight_decay=0.01,
             bf16=True,
-            evaluation_strategy="epoch",
+            eval_strategy="epoch",
             save_strategy="epoch",
             load_best_model_at_end=True,
             metric_for_best_model="macro_f1",
