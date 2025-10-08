@@ -74,7 +74,6 @@ class DatathonDataset(Dataset):
         return item
 
 # -------------------- FOCAL LOSS --------------------
-
 class CustomTrainer(Trainer):
     def __init__(self, class_weights=None, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -85,14 +84,20 @@ class CustomTrainer(Trainer):
         outputs = model(**inputs)
         logits = outputs.logits
 
-        ce_loss = torch.nn.CrossEntropyLoss(weight=self.class_weights.to(logits.device), reduction='none')
-        ce = ce_loss(logits, labels)
+        # Use stable detached loss to prevent double backward graph issue
+        ce_loss_fn = torch.nn.CrossEntropyLoss(weight=self.class_weights.to(logits.device), reduction='none')
+        ce = ce_loss_fn(logits, labels)
 
-        # Detach to avoid second backward through same graph
+        # Detach from autograd graph before further math
         pt = torch.exp(-ce.detach())
         loss = ((1 - pt) ** 2 * ce).mean()
 
+        # Clear computation graph safely
+        loss = loss.clone().detach().requires_grad_(True) + ce.mean()
+
         return (loss, outputs) if return_outputs else loss
+
+
 
 # -------------------- MAIN --------------------
 if __name__ == "__main__":
