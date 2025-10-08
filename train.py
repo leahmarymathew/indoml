@@ -222,16 +222,15 @@ def main():
     model.config.use_cache = False
 
     # --- Custom Trainer (safe compute_loss: return only loss) ---
+    
     class CustomTrainer(Trainer):
-        def compute_loss(self, model, inputs, return_outputs=False):
-            # inputs is a dict already collated (input_ids, attention_mask, labels)
+        def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
             labels = inputs.pop("labels")
             outputs = model(**inputs)
             logits = outputs.logits
             loss_fct = torch.nn.CrossEntropyLoss(weight=class_weights.to(logits.device))
-            loss = loss_fct(logits.view(-1, model.config.num_labels), labels.view(-1))
-            # ALWAYS return only loss here to avoid Trainer/Accelerate keeping the graph around
-            return loss
+            loss = loss_fct(logits.view(-1, self.model.config.num_labels), labels.view(-1))
+            return (loss, outputs) if return_outputs else loss
 
     # --- Training arguments (conservative defaults) ---
     training_args = TrainingArguments(
@@ -246,7 +245,7 @@ def main():
         bf16=False,    # disabled by default for stability
         fp16=False,
         logging_dir="./logs_safe",
-        evaluation_strategy="epoch",
+        eval_strategy="epoch",
         save_strategy="epoch",
         load_best_model_at_end=True,
         metric_for_best_model="macro_f1",
