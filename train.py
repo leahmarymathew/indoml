@@ -152,14 +152,29 @@ def safe_model_load(checkpoint, num_labels, id2label, label2id, use_8bit=False):
             return safe_model_load("microsoft/deberta-v3-base", num_labels, id2label, label2id, use_8bit=False)
         raise
 
+
+
 class CustomTrainer(Trainer):
     def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
-        labels = inputs.pop("labels")
-        outputs = model(**inputs)
+        # keep a copy of labels and avoid mutating external dicts
+        labels = inputs.get("labels")
+        # run model forward
+        outputs = model(**{k: v for k, v in inputs.items() if k != "labels"})
         logits = outputs.logits
+        # compute weighted cross-entropy
         loss_fct = torch.nn.CrossEntropyLoss(weight=class_weights.to(logits.device))
         loss = loss_fct(logits.view(-1, model.config.num_labels), labels.view(-1))
+        # Trainer expects (loss, outputs) when return_outputs=True (used in eval/predict)
+        if return_outputs:
+            # detach logits to avoid holding computation graph (evaluation/predict only)
+            try:
+                outputs.logits = outputs.logits.detach()
+            except Exception:
+                # if outputs is not mutable, just continue — it's usually fine in eval mode
+                pass
+            return (loss, outputs)
         return loss
+
 
 if __name__ == "__main__":
     print_cuda_info()
