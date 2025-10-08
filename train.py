@@ -79,25 +79,18 @@ class CustomTrainer(Trainer):
         super().__init__(*args, **kwargs)
         self.class_weights = class_weights
 
-    def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
+    def compute_loss(self, model, inputs, return_outputs=False):
         labels = inputs.pop("labels")
         outputs = model(**inputs)
         logits = outputs.logits
 
-        # Use stable detached loss to prevent double backward graph issue
-        ce_loss_fn = torch.nn.CrossEntropyLoss(weight=self.class_weights.to(logits.device), reduction='none')
-        ce = ce_loss_fn(logits, labels)
+        # Move class weights to same device
+        loss_fct = torch.nn.CrossEntropyLoss(weight=self.class_weights.to(logits.device))
+        loss = loss_fct(logits.view(-1, self.model.config.num_labels), labels.view(-1))
 
-        # Detach from autograd graph before further math
-        pt = torch.exp(-ce.detach())
-        loss = ((1 - pt) ** 2 * ce).mean()
-
-        # Clear computation graph safely
-        loss = loss.clone().detach().requires_grad_(True) + ce.mean()
-
+        # detach everything cleanly — no graph reuse
+        loss = loss.mean()
         return (loss, outputs) if return_outputs else loss
-
-
 
 # -------------------- MAIN --------------------
 if __name__ == "__main__":
