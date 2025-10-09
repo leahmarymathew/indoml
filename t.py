@@ -185,8 +185,9 @@ def main():
         gc.collect()
         model = safe_model_load("microsoft/deberta-v3-large" if USE_LARGE else "microsoft/deberta-v3-base", NUM_LABELS, id2label, label2id, use_8bit=(USE_8BIT and BNB_AVAILABLE))
         model.config.use_cache = False
-        if USE_LARGE and torch.cuda.is_available():
+        if USE_LARGE and torch.cuda.is_available() and not USE_FP16:
             model.gradient_checkpointing_enable()
+
 
         training_args = TrainingArguments(
             output_dir=f"{OUTPUT_DIR_BASE}_{fold}",
