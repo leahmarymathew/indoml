@@ -219,7 +219,7 @@ def main():
             weight_decay=0.01,
             bf16=False,
             fp16=False,
-            evaluation_strategy="epoch",
+            eval_strategy="epoch",
             save_strategy="epoch",
             load_best_model_at_end=True,
             metric_for_best_model="macro_f1",
