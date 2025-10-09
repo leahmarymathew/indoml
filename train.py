@@ -35,7 +35,7 @@ MODEL_CHECKPOINT = "microsoft/deberta-v3-large" if USE_LARGE else "microsoft/deb
 TRAIN_FILE_PATH = "./trainset.json"
 DEV_TEST_FILE_PATH = "./dev_testset.json"
 MAX_LENGTH = 512
-NUM_FOLDS = int(os.environ.get("NUM_FOLDS", 1))
+NUM_FOLDS = int(os.environ.get("NUM_FOLDS", 5))
 SEED = int(os.environ.get("SEED", 42))
 EPOCHS = int(os.environ.get("EPOCHS", 12))
 LR = float(os.environ.get("LR", 2e-5))
@@ -204,7 +204,7 @@ def main():
     all_test_preds = []
     fold_weights = []
 
-    for fold in range(NUM_FOLDS):
+    for fold in range(1):
         print(f"\n=== FOLD {fold} ===")
         train_df_fold = df[df['fold'] != fold].reset_index(drop=True)
         val_df_fold = df[df['fold'] == fold].reset_index(drop=True)
