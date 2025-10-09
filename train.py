@@ -244,7 +244,7 @@ def main():
             warmup_ratio=WARMUP_RATIO,
             weight_decay=WEIGHT_DECAY,
             logging_dir=f"./logs_fold_{fold}",
-            evaluation_strategy="epoch",
+            eval_strategy="epoch",
             save_strategy="epoch",
             load_best_model_at_end=True,
             metric_for_best_model="macro_f1",
