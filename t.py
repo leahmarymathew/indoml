@@ -101,20 +101,36 @@ class CustomTrainer(Trainer):
         self.class_weights = class_weights
         self.use_focal = use_focal
         self.label_smoothing = label_smoothing
-
+    
     def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
-        labels = inputs.pop("labels")
+        labels = inputs.pop("labels", None)
         outputs = model(**inputs)
         logits = outputs.logits
         device = logits.device
-        cw = self.class_weights.to(device) if self.class_weights is not None else None
-        if self.use_focal:
-            ce = torch.nn.functional.cross_entropy(logits, labels, weight=cw, reduction='none')
-            pt = torch.exp(-ce.detach())
-            loss = ((1 - pt) ** 2 * ce).mean()
+
+        if labels is not None:
+            if self.class_weights is not None:
+                cw = self.class_weights.to(device)
+            else:
+                cw = None
+
+            if self.use_focal:
+                ce = torch.nn.functional.cross_entropy(logits, labels, weight=cw, reduction='none')
+                pt = torch.exp(-ce.detach())
+                loss = ((1 - pt) ** 2 * ce).mean()
+            else:
+                loss_fct = torch.nn.CrossEntropyLoss(weight=cw, label_smoothing=self.label_smoothing)
+                loss = loss_fct(logits.view(-1, model.config.num_labels), labels.view(-1))
         else:
-            loss_fct = torch.nn.CrossEntropyLoss(weight=cw, label_smoothing=self.label_smoothing)
-            loss = loss_fct(logits.view(-1, model.config.num_labels), labels.view(-1))
+        # Evaluation without labels: just return dummy loss
+            loss = torch.tensor(0.0, device=logits.device)
+
+        if return_outputs:
+            try:
+                outputs.logits = outputs.logits.detach()
+            except Exception:
+                pass
+            return loss, outputs
         return loss
 
 def safe_model_load(checkpoint, num_labels, id2label, label2id, use_8bit=False):
