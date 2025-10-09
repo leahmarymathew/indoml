@@ -229,6 +229,7 @@ def main():
 
         torch.cuda.empty_cache()
         gc.collect()
+        print("✅ Using model:", MODEL_CHECKPOINT)
 
         model = safe_model_load(MODEL_CHECKPOINT, NUM_LABELS, id2label, label2id, use_8bit=(USE_8BIT and BNB_AVAILABLE))
         # do not enable checkpointing unless explicitly allowed above
