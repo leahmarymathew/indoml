@@ -1,4 +1,3 @@
-# train.py -- enhanced for higher Macro F1
 import os
 os.environ["TORCH_COMPILE_DISABLE"] = "1"
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
@@ -22,15 +21,12 @@ from transformers import (
 )
 from transformers.data.data_collator import default_data_collator
 
-# -------------------- CONFIG --------------------
-USE_LARGE = os.environ.get("USE_LARGE", "1") == "1"  # force large
+USE_LARGE = os.environ.get("USE_LARGE", "1") == "1"
 USE_8BIT = os.environ.get("USE_8BIT", "0") == "1"
-ENABLE_CHECKPOINTING = os.environ.get("ENABLE_CHECKPOINTING", "0") == "1"
 USE_FP16 = os.environ.get("USE_FP16", "1") == "1"
-USE_FOCAL = os.environ.get("USE_FOCAL", "0") == "1"
+USE_FOCAL = os.environ.get("USE_FOCAL", "0") == "0"
 OVERSAMPLE = os.environ.get("OVERSAMPLE", "1") == "1"
 OUTPUT_DIR_BASE = os.environ.get("OUTPUT_DIR_BASE", "./results_fold")
-MODEL_CHECKPOINT = "microsoft/deberta-v3-large"
 TRAIN_FILE_PATH = "./trainset.json"
 DEV_TEST_FILE_PATH = "./dev_testset.json"
 MAX_LENGTH = 512
@@ -41,25 +37,22 @@ LR = float(os.environ.get("LR", 1e-5))
 BATCH = int(os.environ.get("BATCH", 1))
 ACCUM_STEPS = int(os.environ.get("ACCUM", 8))
 WEIGHT_DECAY = float(os.environ.get("WD", 0.01))
-WARMUP_RATIO = float(os.environ.get("WARMUP_RATIO", 0.1))
+WARMUP_RATIO = float(os.environ.get("WARMUP_RATIO", 0.2))
 EARLY_STOP_PATIENCE = int(os.environ.get("EARLY_STOP_PATIENCE", 5))
-LABEL_SMOOTHING = float(os.environ.get("LABEL_SMOOTHING", 0.1))
+LABEL_SMOOTHING = float(os.environ.get("LABEL_SMOOTHING", 0.15))
 
 BNB_AVAILABLE = False
 if USE_8BIT:
     try:
         import bitsandbytes
         BNB_AVAILABLE = True
-    except Exception:
+    except:
         BNB_AVAILABLE = False
 
 torch.manual_seed(SEED)
 np.random.seed(SEED)
 
-print("✅ Using model:", MODEL_CHECKPOINT)
-
-# -------------------- HELPERS --------------------
-def preprocess_data(filepath: str):
+def preprocess_data(filepath):
     with open(filepath, 'r', encoding='utf-8') as f:
         data = json.load(f)
     rows = []
@@ -67,7 +60,6 @@ def preprocess_data(filepath: str):
         history = entry.get("conversation_history", "")
         responses = entry.get("tutor_responses", {}) or {}
         for tutor_name, details in responses.items():
-            if not isinstance(details, dict): continue
             ann = details.get("annotation", {}) or {}
             if "Mistake_Identification" in ann:
                 rows.append({
@@ -123,42 +115,31 @@ class CustomTrainer(Trainer):
         else:
             loss_fct = torch.nn.CrossEntropyLoss(weight=cw, label_smoothing=self.label_smoothing)
             loss = loss_fct(logits.view(-1, model.config.num_labels), labels.view(-1))
-        if return_outputs:
-            try: outputs.logits = outputs.logits.detach()
-            except: pass
-            return loss, outputs
         return loss
 
 def safe_model_load(checkpoint, num_labels, id2label, label2id, use_8bit=False):
     kwargs = dict(num_labels=num_labels, id2label=id2label, label2id=label2id)
     try:
         if use_8bit and BNB_AVAILABLE:
-            model = AutoModelForSequenceClassification.from_pretrained(checkpoint, load_in_8bit=True, device_map="auto", ignore_mismatched_sizes=True, **kwargs)
+            model = AutoModelForSequenceClassification.from_pretrained(checkpoint, load_in_8bit=True, device_map="auto", **kwargs)
         else:
-            model = AutoModelForSequenceClassification.from_pretrained(checkpoint, low_cpu_mem_usage=True, ignore_mismatched_sizes=True, **kwargs)
+            model = AutoModelForSequenceClassification.from_pretrained(checkpoint, low_cpu_mem_usage=True, **kwargs)
         model.config.use_cache = False
-        if ENABLE_CHECKPOINTING:
-            try:
-                model.gradient_checkpointing_enable()
-                model.config.use_cache = False
-            except: pass
         return model
-    except Exception as e:
-        print("❌ Failed to load large model:", repr(e))
-        raise RuntimeError("Cannot proceed without large model. Base model fallback has been removed.")
+    except:
+        if checkpoint != "microsoft/deberta-v3-base":
+            return safe_model_load("microsoft/deberta-v3-base", num_labels, id2label, label2id, use_8bit=False)
+        raise
 
-# -------------------- MAIN --------------------
 def main():
     print("Starting enhanced CV training (aim: high macro-F1)")
     df = preprocess_data(TRAIN_FILE_PATH)
     if df.empty: raise RuntimeError("No data found in TRAIN_FILE_PATH")
-
     labels_list = sorted(df['mistake_label'].unique().tolist())
     label2id = {l:i for i,l in enumerate(labels_list)}
     id2label = {i:l for l,i in label2id.items()}
     NUM_LABELS = len(labels_list)
     df['labels'] = df['mistake_label'].map(label2id)
-
     class_weights = torch.tensor(compute_class_weight("balanced", classes=np.arange(NUM_LABELS), y=df['labels'].to_numpy()), dtype=torch.float)
 
     with open(DEV_TEST_FILE_PATH, 'r', encoding='utf-8') as f:
@@ -170,7 +151,7 @@ def main():
         for tutor_name, details in (entry.get("tutor_responses", {}) or {}).items():
             test_rows.append({"conversation_id": convo_id, "tutor": tutor_name, "history": history, "response": details.get("response", "")})
     test_df = pd.DataFrame(test_rows)
-    tokenizer = AutoTokenizer.from_pretrained(MODEL_CHECKPOINT, use_fast=True)
+    tokenizer = AutoTokenizer.from_pretrained("microsoft/deberta-v3-large" if USE_LARGE else "microsoft/deberta-v3-base", use_fast=True)
     test_dataset = DatathonDataset(test_df, tokenizer, MAX_LENGTH, is_test=True)
 
     skf = StratifiedKFold(n_splits=NUM_FOLDS, shuffle=True, random_state=SEED)
@@ -202,9 +183,10 @@ def main():
 
         torch.cuda.empty_cache()
         gc.collect()
-
-        model = safe_model_load(MODEL_CHECKPOINT, NUM_LABELS, id2label, label2id, use_8bit=(USE_8BIT and BNB_AVAILABLE))
+        model = safe_model_load("microsoft/deberta-v3-large" if USE_LARGE else "microsoft/deberta-v3-base", NUM_LABELS, id2label, label2id, use_8bit=(USE_8BIT and BNB_AVAILABLE))
         model.config.use_cache = False
+        if USE_LARGE and torch.cuda.is_available():
+            model.gradient_checkpointing_enable()
 
         training_args = TrainingArguments(
             output_dir=f"{OUTPUT_DIR_BASE}_{fold}",
@@ -226,7 +208,6 @@ def main():
             fp16=USE_FP16,
             dataloader_pin_memory=True,
             lr_scheduler_type="cosine",
-            label_smoothing_factor=0.0,
         )
 
         trainer = CustomTrainer(
@@ -238,34 +219,12 @@ def main():
             tokenizer=tokenizer,
             class_weights=class_weights,
             use_focal=USE_FOCAL,
-            label_smoothing=0.0 if USE_FOCAL else LABEL_SMOOTHING,
+            label_smoothing=LABEL_SMOOTHING,
             data_collator=default_data_collator,
             callbacks=[EarlyStoppingCallback(early_stopping_patience=EARLY_STOP_PATIENCE)],
         )
 
-        # sanity check
-        try:
-            sample = [train_dataset[i] for i in range(min(2, len(train_dataset)))]
-            batch = default_data_collator(sample)
-            device = trainer.model.device
-            batch = {k: v.to(device) for k, v in batch.items()}
-            if trainer.optimizer is None: trainer.create_optimizer_and_scheduler(num_training_steps=1)
-            trainer.model.train()
-            trainer.optimizer.zero_grad(set_to_none=True)
-            loss = trainer.compute_loss(trainer.model, dict(batch))
-            print(" single-step loss:", float(loss.detach().cpu().numpy()))
-            loss.backward()
-            trainer.optimizer.step()
-            print(" single-step optimizer step OK")
-            torch.cuda.empty_cache()
-            gc.collect()
-        except Exception as e:
-            print("Sanity test failed on fold", fold, "error:", repr(e))
-            raise
-
-        print("Training fold", fold)
         trainer.train()
-
         metrics = trainer.evaluate()
         val_f1 = float(metrics.get("eval_macro_f1", 0.0))
         val_acc = float(metrics.get("eval_accuracy", 0.0))
@@ -273,21 +232,18 @@ def main():
         all_val_f1.append(val_f1)
         all_val_acc.append(val_acc)
         fold_weights.append(max(0.0, val_f1))
-
         preds_out = trainer.predict(test_dataset)
         all_test_preds.append(preds_out.predictions)
-
-        del trainer
-        del model
+        del trainer, model
         torch.cuda.empty_cache()
         gc.collect()
         time.sleep(1)
 
     weights = np.array(fold_weights, dtype=float)
-    weights = weights / weights.sum() if weights.sum() > 0 else np.ones(len(all_test_preds), dtype=float) / len(all_test_preds)
+    if weights.sum() <= 0: weights = np.ones(len(all_test_preds), dtype=float)/len(all_test_preds)
+    else: weights = weights/weights.sum()
     stacked = np.stack(all_test_preds, axis=0)
     avg = np.tensordot(weights, stacked, axes=(0,0))
-
     final_nums = np.argmax(avg, axis=1)
     rev_map = {v:k for k,v in label2id.items()}
     final_texts = [rev_map[int(i)] for i in final_nums]
@@ -295,7 +251,6 @@ def main():
     submission_df = test_df[['conversation_id', 'tutor']].copy()
     submission_df['prediction'] = final_texts
     submission_df.to_csv("submission_cv_ensemble_weighted.csv", index=False)
-
     print("\nFinal CV Macro F1: {:.4f} ± {:.4f}".format(np.mean(all_val_f1), np.std(all_val_f1)))
     print("Final CV Accuracy: {:.4f} ± {:.4f}".format(np.mean(all_val_acc), np.std(all_val_acc)))
     print("Saved submission_cv_ensemble_weighted.csv")
