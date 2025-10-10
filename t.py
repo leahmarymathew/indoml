@@ -124,6 +124,8 @@ class CustomTrainer(Trainer):
         else:
         # Evaluation without labels: just return dummy loss
             loss = torch.tensor(0.0, device=logits.device)
+        if loss.dim() == 0:
+            loss = loss.unsqueeze(0)
 
         if return_outputs:
             try:
